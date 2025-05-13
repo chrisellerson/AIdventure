@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional, List, Callable
 from abc import ABC, abstractmethod
 import pygame
 import logging
+import os
 
 from .game_state import GameState
 
@@ -125,30 +126,64 @@ class GameplayScene(Scene):
         self.font = pygame.font.Font(None, 24)
         self.dialogue_active = False
         self.current_dialogue: Optional[Dict[str, Any]] = None
+        self.story_initialized = False
+        self.story_initializing = False
+        self.current_story_text = ""
+        self.story_queue = []
+        
+        # Initialize the story agent
+        from src.ai.agent_manager import AgentManager
+        self.agent_manager = AgentManager(os.getenv("XAI_API_KEY", ""))
+    
+    async def initialize_story(self):
+        """Initialize the game story and starting area."""
+        if not self.story_initialized and not self.story_initializing:
+            self.story_initializing = True
+            try:
+                # Create initial story input
+                input_data = {
+                    "player_action": "start_game",
+                    "player_class": self.game_state.player.character_class,
+                    "player_name": self.game_state.player.name,
+                    "current_location": "starting_area"
+                }
+                
+                # Get story response
+                response = await self.agent_manager.process_story_input(input_data)
+                
+                # Update game state with story elements
+                self.current_story_text = response["story_update"]
+                self.story_queue = [self.current_story_text]  # Reset queue with only the initial story
+                
+                # Update NPCs and quests
+                for npc_id, npc_response in response["npc_responses"].items():
+                    self.game_state.record_npc_interaction(npc_id, {"text": npc_response})
+                
+                for quest_update in response["quest_updates"]:
+                    self.game_state.update_quest_progress(
+                        quest_update["quest_id"],
+                        quest_update["description"],
+                        0
+                    )
+                
+                self.story_initialized = True
+            except Exception as e:
+                logger.error(f"Error initializing story: {e}")
+                self.current_story_text = "Error initializing story. Please try again."
+            finally:
+                self.story_initializing = False
     
     def handle_event(self, event: pygame.event.Event) -> None:
         """Handle gameplay events."""
-        if self.dialogue_active:
-            self._handle_dialogue_event(event)
-        else:
-            self._handle_gameplay_event(event)
-    
-    def _handle_dialogue_event(self, event: pygame.event.Event) -> None:
-        """Handle dialogue-related events."""
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_SPACE:
-                # Advance dialogue
-                pass
+                if self.story_queue:
+                    self.current_story_text = self.story_queue.pop(0)
+                elif not self.dialogue_active:
+                    # Start player movement or interaction
+                    pass
             elif event.key == pygame.K_ESCAPE:
-                # Close dialogue
-                self.dialogue_active = False
-                self.current_dialogue = None
-    
-    def _handle_gameplay_event(self, event: pygame.event.Event) -> None:
-        """Handle gameplay-related events."""
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_ESCAPE:
-                self.change_scene("pause_menu")
+                self.change_scene("main_menu")  # Changed from pause_menu to main_menu
             elif event.key == pygame.K_i:
                 self.change_scene("inventory")
             elif event.key == pygame.K_m:
@@ -156,38 +191,60 @@ class GameplayScene(Scene):
     
     def update(self, dt: float) -> None:
         """Update gameplay state."""
-        if not self.dialogue_active:
-            # Update player position, animations, etc.
-            pass
+        if not self.story_initialized and not self.story_initializing:
+            # Initialize story asynchronously
+            import asyncio
+            asyncio.create_task(self.initialize_story())
     
     def render(self, surface: pygame.Surface) -> None:
         """Render the gameplay scene."""
         surface.fill((0, 0, 0))  # Black background
         
-        if self.dialogue_active:
-            self._render_dialogue(surface)
+        if not self.story_initialized:
+            # Show loading message
+            loading = self.font.render("Initializing your adventure...", True, (255, 255, 255))
+            surface.blit(loading, (surface.get_width() // 2 - loading.get_width() // 2, 
+                                 surface.get_height() // 2))
+        elif self.current_story_text:
+            # Show story text
+            self._render_story(surface)
         else:
+            # Show gameplay
             self._render_gameplay(surface)
     
-    def _render_dialogue(self, surface: pygame.Surface) -> None:
-        """Render the dialogue interface."""
-        if not self.current_dialogue:
-            return
-        
-        # Render dialogue box
+    def _render_story(self, surface: pygame.Surface) -> None:
+        """Render the story text."""
+        # Create story box
         box_rect = pygame.Rect(50, surface.get_height() - 200, surface.get_width() - 100, 150)
         pygame.draw.rect(surface, (0, 0, 0), box_rect)
         pygame.draw.rect(surface, (255, 255, 255), box_rect, 2)
         
-        # Render dialogue text
-        text = self.font.render(self.current_dialogue["text"], True, (255, 255, 255))
-        surface.blit(text, (box_rect.x + 20, box_rect.y + 20))
+        # Render story text with word wrapping
+        words = self.current_story_text.split()
+        lines = []
+        current_line = []
         
-        # Render choices if any
-        if "choices" in self.current_dialogue:
-            for i, choice in enumerate(self.current_dialogue["choices"]):
-                choice_text = self.font.render(choice["text"], True, (255, 255, 255))
-                surface.blit(choice_text, (box_rect.x + 20, box_rect.y + 60 + i * 30))
+        for word in words:
+            test_line = " ".join(current_line + [word])
+            text_surface = self.font.render(test_line, True, (255, 255, 255))
+            if text_surface.get_width() < box_rect.width - 40:
+                current_line.append(word)
+            else:
+                lines.append(" ".join(current_line))
+                current_line = [word]
+        
+        if current_line:
+            lines.append(" ".join(current_line))
+        
+        # Render each line
+        for i, line in enumerate(lines):
+            text = self.font.render(line, True, (255, 255, 255))
+            surface.blit(text, (box_rect.x + 20, box_rect.y + 20 + i * 25))
+        
+        # Render continue prompt
+        if self.story_queue:
+            prompt = self.font.render("Press SPACE to continue...", True, (200, 200, 200))
+            surface.blit(prompt, (box_rect.x + 20, box_rect.y + box_rect.height - 30))
     
     def _render_gameplay(self, surface: pygame.Surface) -> None:
         """Render the main gameplay view."""
@@ -209,6 +266,120 @@ class GameplayScene(Scene):
         # Location name
         location = self.font.render(self.game_state.player.location, True, (255, 255, 255))
         surface.blit(location, (surface.get_width() - location.get_width() - 20, 20))
+        
+        # Character info
+        char_info = self.font.render(
+            f"{self.game_state.player.name} - Level {self.game_state.player.level} {self.game_state.player.character_class}",
+            True, (255, 255, 255)
+        )
+        surface.blit(char_info, (20, 50))
+
+class CharacterCreationScene(Scene):
+    """Character creation scene."""
+    
+    def __init__(self, game_state: GameState):
+        """Initialize the character creation scene."""
+        super().__init__(game_state)
+        self.font = pygame.font.Font(None, 36)
+        self.small_font = pygame.font.Font(None, 24)
+        self.name = ""
+        self.name_active = True
+        self.selected_class = 0
+        self.classes = ["Warrior", "Mage", "Rogue"]
+        self.class_descriptions = {
+            "Warrior": "A mighty warrior skilled in combat and heavy armor.",
+            "Mage": "A powerful spellcaster who wields arcane magic.",
+            "Rogue": "A stealthy adventurer who excels in agility and precision."
+        }
+    
+    def handle_event(self, event: pygame.event.Event) -> None:
+        """Handle character creation events."""
+        if event.type == pygame.KEYDOWN:
+            if self.name_active:
+                if event.key == pygame.K_RETURN and self.name:
+                    self.name_active = False
+                elif event.key == pygame.K_BACKSPACE:
+                    self.name = self.name[:-1]
+                elif event.key == pygame.K_ESCAPE:
+                    self.change_scene("main_menu")
+                elif len(self.name) < 20:  # Limit name length
+                    self.name += event.unicode
+            else:
+                if event.key == pygame.K_UP:
+                    self.selected_class = (self.selected_class - 1) % len(self.classes)
+                elif event.key == pygame.K_DOWN:
+                    self.selected_class = (self.selected_class + 1) % len(self.classes)
+                elif event.key == pygame.K_RETURN:
+                    self._create_character()
+                elif event.key == pygame.K_ESCAPE:
+                    self.name_active = True
+    
+    def _create_character(self) -> None:
+        """Create the character and start the game."""
+        # Initialize player state with selected class
+        self.game_state.new_game(self.name)
+        self.game_state.player.character_class = self.classes[self.selected_class]
+        
+        # Set class-specific starting stats
+        if self.classes[self.selected_class] == "Warrior":
+            self.game_state.player.health = 120
+            self.game_state.player.max_health = 120
+            self.game_state.player.strength = 10
+            self.game_state.player.defense = 8
+        elif self.classes[self.selected_class] == "Mage":
+            self.game_state.player.health = 80
+            self.game_state.player.max_health = 80
+            self.game_state.player.magic = 12
+            self.game_state.player.mana = 100
+        else:  # Rogue
+            self.game_state.player.health = 90
+            self.game_state.player.max_health = 90
+            self.game_state.player.agility = 12
+            self.game_state.player.stealth = 10
+        
+        # Start the game
+        self.change_scene("gameplay")
+    
+    def update(self, dt: float) -> None:
+        """Update character creation state."""
+        pass
+    
+    def render(self, surface: pygame.Surface) -> None:
+        """Render the character creation screen."""
+        surface.fill((0, 0, 0))  # Black background
+        
+        # Render title
+        title = self.font.render("Create Your Character", True, (255, 255, 255))
+        title_rect = title.get_rect(center=(surface.get_width() // 2, 100))
+        surface.blit(title, title_rect)
+        
+        # Render name input
+        name_label = self.font.render("Enter your name:", True, (255, 255, 255))
+        surface.blit(name_label, (surface.get_width() // 2 - 200, 200))
+        
+        name_box = pygame.Rect(surface.get_width() // 2 - 200, 250, 400, 40)
+        pygame.draw.rect(surface, (255, 255, 255) if self.name_active else (100, 100, 100), name_box, 2)
+        
+        name_text = self.font.render(self.name + ("|" if self.name_active else ""), True, (255, 255, 255))
+        surface.blit(name_text, (name_box.x + 10, name_box.y + 5))
+        
+        if not self.name_active:
+            # Render class selection
+            class_label = self.font.render("Choose your class:", True, (255, 255, 255))
+            surface.blit(class_label, (surface.get_width() // 2 - 200, 350))
+            
+            for i, class_name in enumerate(self.classes):
+                color = (255, 255, 0) if i == self.selected_class else (255, 255, 255)
+                class_text = self.font.render(class_name, True, color)
+                surface.blit(class_text, (surface.get_width() // 2 - 200, 400 + i * 50))
+                
+                # Render class description
+                desc = self.small_font.render(self.class_descriptions[class_name], True, (200, 200, 200))
+                surface.blit(desc, (surface.get_width() // 2 - 200, 425 + i * 50))
+            
+            # Render instructions
+            instructions = self.small_font.render("Use UP/DOWN to select class, ENTER to confirm, ESC to go back", True, (150, 150, 150))
+            surface.blit(instructions, (surface.get_width() // 2 - 300, 600))
 
 class SceneManager:
     """Manages scene transitions and updates."""

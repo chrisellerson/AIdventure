@@ -7,8 +7,8 @@ from datetime import datetime
 import json
 from pathlib import Path
 
-from ..tools.template_manager import TemplateManager
-from ..utils.document_manager import DocumentManager
+from src.tools.template_manager import TemplateManager
+from src.utils.document_manager import DocumentManager
 
 @dataclass
 class PlayerState:

@@ -138,6 +138,14 @@ def test_scene_system():
     """Test the scene management system."""
     print("Starting scene system test...")
     
+    # Initialize pygame
+    import pygame
+    pygame.init()
+    
+    # Create window
+    screen = pygame.display.set_mode((800, 600))
+    pygame.display.set_caption("Scene System Test")
+    
     # Create game state
     game_state = GameState()
     
@@ -158,6 +166,8 @@ def test_scene_system():
     assert scene_manager.current_scene.__class__.__name__ == "GameplayScene"
     print("Changed to gameplay scene")
     
+    # Clean up
+    pygame.quit()
     print("Scene system tests passed!")
 
 def main():

@@ -1,0 +1,29 @@
+{
+  "name": "Test NPC",
+  "role": "Merchant",
+  "background": "A traveling merchant who sells rare items",
+  "personality": {
+    "friendly": 0.8,
+    "greedy": 0.6,
+    "honest": 0.7
+  },
+  "dialogue_style": "formal",
+  "appearance": {
+    "height": "tall",
+    "build": "slim",
+    "clothing": "traveling merchant robes"
+  },
+  "skills": [
+    "bargaining",
+    "appraisal",
+    "survival"
+  ],
+  "relationships": {
+    "player": "neutral",
+    "other_merchants": "friendly"
+  },
+  "created_at": "2025-05-12T19:21:47.060027",
+  "instance_id": "test_merchant_20250512_192147",
+  "interaction_history": [],
+  "last_updated": "2025-05-12T19:21:47.060061"
+}

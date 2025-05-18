@@ -1,0 +1,41 @@
+{
+  "title": "Gather Rare Materials",
+  "description": "Collect rare materials for the merchant",
+  "quest_type": "side",
+  "objectives": [
+    {
+      "description": "Collect dragon scales",
+      "target": "dragon_scale",
+      "count": 5,
+      "current": 0,
+      "is_optional": false
+    },
+    {
+      "description": "Find ancient scrolls",
+      "target": "ancient_scroll",
+      "count": 3,
+      "current": 0,
+      "is_optional": true
+    }
+  ],
+  "rewards": {
+    "gold": 1000,
+    "items": [
+      "rare_potion",
+      "enchanted_ring"
+    ]
+  },
+  "prerequisites": [],
+  "time_limit": 1440,
+  "repeatable": true,
+  "created_at": "2025-05-17T20:42:52.451761",
+  "quest_id": "gather_materials_20250517_204252",
+  "status": "not_started",
+  "start_time": null,
+  "completion_time": null,
+  "progress": {
+    "Collect dragon scales": 0,
+    "Find ancient scrolls": 0
+  },
+  "last_updated": "2025-05-17T20:42:52.451776"
+}

@@ -3,13 +3,26 @@ Main game entry point.
 """
 import pygame
 import sys
+import logging
 import os
 import asyncio
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Add src to Python path
-sys.path.append(str(Path(__file__).parent.parent))
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
+# Add the project root directory to Python path
+project_root = Path(__file__).parent.parent
+sys.path.append(str(project_root))
 
 # Load environment variables
 load_dotenv()

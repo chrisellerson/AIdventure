@@ -1,21 +1,29 @@
 """
 Story generation agent for creating dynamic game narratives.
 """
+import os
 import json
-from typing import Any, Dict, List
+import logging
+from typing import Any, Dict, List, Optional
 import aiohttp
 from .agent_base import BaseAgent
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 class StoryAgent(BaseAgent):
     """Agent responsible for generating and managing the game's story."""
     
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: Optional[str] = None, tileset=None):
         """Initialize the story agent.
         
         Args:
-            api_key: The xAI API key
+            api_key: Optional API key for AI service
+            tileset: The game tileset to use for tile operations
         """
-        super().__init__(api_key)
+        super().__init__(api_key or os.getenv("XAI_API_KEY"))
+        if not self.api_key:
+            logger.warning("No API key provided for story agent")
         self.story_context = {
             "current_location": None,
             "active_quests": [],
@@ -24,6 +32,7 @@ class StoryAgent(BaseAgent):
             "player_choices": []
         }
         self.api_url = "https://api.x.ai/v1/chat/completions"
+        self.tileset = tileset
 
     async def think(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process story input and generate a response.
@@ -83,20 +92,53 @@ Player Choices: {json.dumps(context.get('player_choices', []))}
 Player Action: {input_data.get('player_action', 'unknown')}
 Player Choice: {input_data.get('player_choice', 'none')}
 
+When describing scenes, use these basic elements:
+
+Base Terrain:
+- grass (plain or wild)
+- path (dirt or stone)
+- water
+
+Structures:
+- walls (stone or wood)
+- doors (wood or metal)
+- floors (stone or wood)
+
+Features:
+- trees
+- rocks
+- bushes
+- flowers
+
+Objects:
+- chests
+- barrels
+- tables
+- chairs
+
+Characters:
+- villagers
+- merchants
+- guards
+- monsters (small or large)
+
+Describe scenes using these elements. For example:
+"A dirt path leads through a village, with wooden houses on either side. Trees and bushes dot the landscape, and villagers mill about near market stalls with barrels and tables."
+
 Generate a response in the following JSON format:
-{{
+{
     "story_update": "A narrative description of what happens next",
-    "npc_responses": {{
+    "npc_responses": {
         "npc_id": "What the NPC says or does"
-    }},
+    },
     "quest_updates": [
-        {{
+        {
             "quest_id": "quest identifier",
             "status": "new/updated/completed",
             "description": "quest update description"
-        }}
+        }
     ]
-}}
+}
 
 Keep the response concise and focused on the immediate situation. Return ONLY the JSON response, no additional text."""
 
@@ -128,9 +170,9 @@ Keep the response concise and focused on the immediate situation. Return ONLY th
             async with aiohttp.ClientSession() as session:
                 async with session.post(self.api_url, headers=headers, json=data) as response:
                     response_text = await response.text()
-                    print(f"\nAPI Response Status: {response.status}")
-                    print(f"API Response Headers: {response.headers}")
-                    print(f"API Response Body: {response_text[:500]}...")  # Print first 500 chars
+                    logger.info(f"\nAPI Response Status: {response.status}")
+                    logger.info(f"API Response Headers: {response.headers}")
+                    logger.info(f"API Response Body: {response_text[:500]}...")  # Print first 500 chars
                     
                     if response.status == 200:
                         result = json.loads(response_text)
@@ -145,7 +187,7 @@ Keep the response concise and focused on the immediate situation. Return ONLY th
                             try:
                                 return json.loads(content)
                             except json.JSONDecodeError:
-                                print(f"Failed to parse response as JSON: {content}")
+                                logger.error(f"Failed to parse response as JSON: {content}")
                                 # Try to extract JSON from the text
                                 import re
                                 json_match = re.search(r'\{.*\}', content, re.DOTALL)
@@ -153,12 +195,12 @@ Keep the response concise and focused on the immediate situation. Return ONLY th
                                     return json.loads(json_match.group())
                                 raise
                         except Exception as e:
-                            print(f"Error processing API response: {str(e)}")
+                            logger.error(f"Error processing API response: {str(e)}")
                             raise
                     else:
                         raise Exception(f"API call failed with status {response.status}: {response_text}")
         except Exception as e:
-            print(f"Error calling xAI API: {str(e)}")
+            logger.error(f"Error calling xAI API: {str(e)}")
             # Return a fallback response if the API call fails
             return {
                 "story_update": "The story continues, but something seems to be interfering with the narrative...",
@@ -203,3 +245,102 @@ Keep the response concise and focused on the immediate situation. Return ONLY th
             "story_update": response.get("story_update", ""),
             "context": self.story_context.copy()
         }) 
+
+    async def generate_intro(self, context: Optional[Dict[str, Any]] = None) -> str:
+        """Generate a story introduction.
+        
+        Args:
+            context: Optional context for story generation
+            
+        Returns:
+            Generated story introduction
+        """
+        try:
+            # Call AI service
+            response = await self._call_xai_api(self._create_story_prompt(context))
+            
+            try:
+                # Process the response
+                story = self._process_story_response(response)
+                return story
+            except Exception as e:
+                logger.error(f"Error processing API response: {str(e)}")
+                return self._get_fallback_intro(context)
+                
+        except Exception as e:
+            logger.error(f"Error calling xAI API: {str(e)}")
+            return self._get_fallback_intro(context) 
+
+    def _process_tile_request(self, tile_request: str) -> Optional[int]:
+        """Process a tile request from the story agent.
+        
+        Args:
+            tile_request: The tile request string
+            
+        Returns:
+            A tile ID that matches the request, or None if no match found
+        """
+        try:
+            # Check if we have a tileset
+            if not self.tileset or not self.tileset.indexer:
+                logger.warning("No tileset available for tile request")
+                return None
+                
+            # Use the scene describer to convert the request into scene elements
+            from core.scene_description import SceneDescriber, SceneElement
+            scene_describer = SceneDescriber(self.tileset.indexer)
+            
+            # Map common descriptions to specific scene elements
+            element = None
+            request_lower = tile_request.lower()
+            
+            # Base terrain
+            if "grass" in request_lower:
+                element = SceneElement.GRASS_PLAIN if "plain" in request_lower else SceneElement.GRASS_WILD
+            elif "path" in request_lower or "road" in request_lower:
+                element = SceneElement.DIRT_PATH if "dirt" in request_lower else SceneElement.STONE_PATH
+            elif "water" in request_lower:
+                element = SceneElement.WATER
+                
+            # Structures
+            elif "wall" in request_lower:
+                element = SceneElement.WALL_STONE if "stone" in request_lower else SceneElement.WALL_WOOD
+            elif "door" in request_lower:
+                element = SceneElement.DOOR_METAL if "metal" in request_lower else SceneElement.DOOR_WOOD
+            elif "floor" in request_lower:
+                element = SceneElement.FLOOR_STONE if "stone" in request_lower else SceneElement.FLOOR_WOOD
+                
+            # Features
+            elif "tree" in request_lower:
+                element = SceneElement.TREE
+            elif "rock" in request_lower:
+                element = SceneElement.ROCK
+            elif "bush" in request_lower:
+                element = SceneElement.BUSH
+            elif "flower" in request_lower:
+                element = SceneElement.FLOWER
+                
+            # Objects
+            elif "chest" in request_lower:
+                element = SceneElement.CHEST
+            elif "barrel" in request_lower:
+                element = SceneElement.BARREL
+            elif "table" in request_lower:
+                element = SceneElement.TABLE
+                
+            # If no match found, default to grass plain
+            if element is None:
+                logger.debug(f"No direct mapping for tile request '{tile_request}', defaulting to grass")
+                element = SceneElement.GRASS_PLAIN
+            
+            # Get the tile ID for the element
+            tile_id = scene_describer.get_tile_for_element(element)
+            if tile_id is None:
+                logger.warning(f"Could not find tile ID for element {element}")
+                return None
+                
+            return tile_id
+            
+        except Exception as e:
+            logger.error(f"Error processing tile request '{tile_request}': {e}")
+            return None 
